@@ -115,3 +115,42 @@ if(!empty())
 
 
 ## 3.2.4 死锁和解决方法
+防范死锁的建议通常是，始终按相同顺序对两个互斥加锁。然而，在某些情况下，采取固定的加锁顺序可能会导致死锁问题。例如，当多个互斥量用于保护类的不同实例时，如果一个函数需要操作两个实例并且固定了它们的加锁顺序，那么在多线程环境下，可能会出现死锁问题。
+例如：假设有两个账户A和B，它们都有对应的余额和互斥量mutexA和mutexB。现在需要编写一个函数transfer，用于将账户A的余额转移到账户B中。为了保证并发修改的正确性，必须对两个账户的互斥量分别进行加锁。
+```cpp
+#include <thread>
+#include <mutex>
+
+class Account {
+public:
+    void transferTo(Account& other, double amount) {
+        std::lock_guard<std::mutex> lock1(mutex);
+        std::lock_guard<std::mutex> lock2(other.mutex);
+        
+        // 将余额从当前账户转移到另一个账户中
+        balance -= amount;
+        other.balance += amount;
+    }
+    
+private:
+    std::mutex mutex;
+    double balance;
+};
+
+int main()
+{
+    Account accountA, accountB;
+    accountA.transferTo(accountB, 100.0); // 线程1执行该语句
+    accountB.transferTo(accountA, 200.0); // 线程2执行该语句
+    
+    return 0;
+}
+
+```
+此时就会造成死锁！
+
+- C++标准库提供了std::lock()函数，专门解决上述问题。它可以同时锁住多个互斥，而没有发生死锁的风险。还提供了std::adopt_lock对象，以指明互斥已被锁住，即互斥上有锁存在，std::lock_guard实例应当据此接收锁的归属权，不得在构造函数内试图另行加锁。
+
+- 原理：假如std::lock()函数在其中一个互斥上成功获取了锁，但它试图在另一个互斥上获取锁时却有异常抛出，那么第一个锁就会自动释放：若加锁操作涉及多个互斥，则std::lock()函数的语义是“全员共同成败”（all-or-nothing，或全部成功锁定，或没获取任何锁并抛出异常）。
+
+- C++17还进一步提供了新的RAII类模板std::scoped_lock<>。std:: scoped_lock<>和std::lock_guard<>完全等价，只不过前者是可变参数模板（variadic template），接收各种互斥型别作为模板参数列表，还以多个互斥对象作为构造函数的参数列表。
